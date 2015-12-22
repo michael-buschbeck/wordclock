@@ -237,7 +237,7 @@ void setupReceiver()
 
 ISR(TIMER1_COMPA_vect)
 {
-  bool sample = (digitalRead(pinReceiverData) == 0 ? true : false);
+  bool const sample = (digitalRead(pinReceiverData) == 0 ? true : false);
 
   bitptrSamplesReceived.set(samplesReceived, sample);
 
@@ -254,7 +254,7 @@ void printSamples()
   Serial.print(F("DCF77: "));
 
   for (uint8_t iSample = 0; iSample < 32; ++iSample) {
-    bool sample = bitptrSamplesDisplayed.get(samplesReceived);
+    bool const sample = bitptrSamplesDisplayed.get(samplesReceived);
 
     ++bitptrSamplesDisplayed;
     if (bitptrSamplesDisplayed == sizeof(samplesReceived) * 8)

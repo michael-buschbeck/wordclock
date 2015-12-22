@@ -436,8 +436,8 @@ inline TransitionWave::TransitionWave(CRGB const colorVia, FuncPixelDelay const 
     for (uint8_t iCol = 0; iCol < Layout::cols(); ++iCol) {
       uint8_t const index = Layout::indexFromCoords(iRow, iCol);
 
-      uint16_t delay    = funcPixelDelay   (iRow, iCol);
-      uint16_t duration = funcPixelDuration(iRow, iCol);
+      uint16_t const delay    = funcPixelDelay   (iRow, iCol);
+      uint16_t const duration = funcPixelDuration(iRow, iCol);
 
       this->pixels[index].delay = delay;
       this->pixels[index].speed = calcSpeed(duration);
@@ -463,7 +463,7 @@ void TransitionWave::prepare(uint32_t const time)
   if (this->idle)
     return;
 
-  uint16_t progressTotal = time - this->timeStart;
+  uint16_t const progressTotal = time - this->timeStart;
 
   if (progressTotal <= this->durationTotal) {
     this->progressTotal = progressTotal;
@@ -479,20 +479,20 @@ CRGB TransitionWave::color(Layer::Iterator const iterator, CRGB const colorFrom,
   if (this->idle)
     return colorTo;
 
-  Pixel pixel = this->pixels[iterator];
+  Pixel const pixel = this->pixels[iterator];
 
   if (this->progressTotal < pixel.delay)
     return colorFrom;
 
-  uint16_t progressPixel = this->progressTotal - pixel.delay;
-  uint8_t alpha = calcAlpha(progressPixel, pixel.speed);
+  uint16_t const progressPixel = this->progressTotal - pixel.delay;
+  uint8_t const alpha = calcAlpha(progressPixel, pixel.speed);
 
   if (alpha == 255)
     return colorTo;
 
   CRGB colorPeak;
   
-  CRGB colorBoth (
+  CRGB const colorBoth (
     max(colorFrom.red,   colorTo.red),
     max(colorFrom.green, colorTo.green),
     max(colorFrom.blue,  colorTo.blue)
@@ -507,8 +507,7 @@ CRGB TransitionWave::color(Layer::Iterator const iterator, CRGB const colorFrom,
     colorPeak = this->colorViaMax;
 
     if (lumaPeak < this->lumaViaMax) {
-      uint8_t alpha = calcAlpha(lumaPeak, this->inverseLumaViaMax);
-      //colorPeak.nscale8(static_cast<uint32_t>(lumaPeak) * 255 / this->lumaViaMax);
+      uint8_t const alpha = calcAlpha(lumaPeak, this->inverseLumaViaMax);
       colorPeak.nscale8(alpha);
     }
   }
@@ -581,14 +580,7 @@ CRGB DisplayClock::color(State const & state, Layer::Iterator const iterator) co
     return this->colorTime;
 
   if (iterator.get(state.layerExtra)) {
-    // TODO rainbow animation:
-    // TODO   per_pixel_phase = ((iRow + iCol) * 16) % 256
-    // TODO   color
-    // TODO     H = (this->time / 16 - per_pixel_phase) % 256
-    // TODO     S = 0x80  <- take from this->colorExtra
-    // TODO     V = 0x60  <- take from this->colorExtra
-
-    uint8_t phasePixel = iterator * 16;
+    uint8_t const phasePixel = iterator * 16;
 
     return CHSV (
       this->time / 16 - phasePixel,
