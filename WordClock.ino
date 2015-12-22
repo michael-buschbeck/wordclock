@@ -1,3 +1,16 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Word Clock powered by Arduino, a DCF77 receiver and some WS2812B LEDs.
+//
+//  (C) 2015 Michael Buschbeck <michael@buschbeck.net>
+//
+//  Licensed under a Creative Commons Attribution 4.0 International License.
+//  Distributed in the hope that it will be useful, but without any warranty.
+//
+//  See <http://creativecommons.org/licenses/by/4.0/> for details.
+//
+
+
 #include <FastLED.h>
 #include <TimeLib.h>
 
