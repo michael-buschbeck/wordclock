@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="UTF-8">
+
+    <title>WordClock</title>
+
+    <script src="http://code.jquery.com/jquery-2.1.4.js"></script>
+
+    <style type="text/css">
+      @font-face {
+        font-family: "Source Code Pro";
+
+        src: url("sourcecodepro-bold-webfont.eot");
+
+        src: url("sourcecodepro-bold-webfont.eot?#iefix")              format("embedded-opentype"),
+             url("sourcecodepro-bold-webfont.woff2")                   format("woff2"),
+             url("sourcecodepro-bold-webfont.woff")                    format("woff"),
+             url("sourcecodepro-bold-webfont.ttf")                     format("truetype"),
+             url("sourcecodepro-bold-webfont.svg#source_code_probold") format("svg");
+
+        font-weight: bold;
+        font-style: normal;
+      }
+
+      body {
+        margin: 0;
+        padding: 0;
+        background: #303030;
+      }
+
+      div#time {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 20px;
+        text-align: center;
+        color: #000000;
+        font-family: "Source Code Pro";
+        font-weight: bold;
+        font-size: 20px;
+      }
+
+      table#clock {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        table-layout: fixed;
+        border-collapse: collapse;
+      }
+
+      table#clock tr {
+        height: 50px;
+      }
+
+      table#clock td {
+        width: 50px;
+        vertical-align: middle;
+        line-height: 50px;
+        text-align: center;
+        color: #000000;
+        font-family: "Source Code Pro";
+        font-weight: bold;
+        font-size: 48px;
+      }
+    </style>
+
+    <script>
+      // var letters = [
+      //              0---4---8--
+      //   /*  0 */  "ES IST FÜNF",
+      //   /*  1 */  "ZEHNVIERTEL",
+      //   /*  2 */  " VOR NACH  ",
+      //   /*  3 */  " HAPPY HALB",
+      //   /*  4 */  "ZWEI NEW   ",
+      //   /*  5 */  "BIRTHDAYEAR",
+      //   /*  6 */  "DREINSECHS ",
+      //   /*  7 */  "SIEBEN VIVI",
+      //   /*  8 */  "ACHTZEHNEUN",
+      //   /*  9 */  "ZWÖLFÜNFELF",
+      //   /* 10 */  "   VIER UHR",
+      // ];
+
+      var letters = [
+        /*  0 */  "ESEISTLFÜNF",
+        /*  1 */  "ZEHNVIERTEL",
+        /*  2 */  "KVORTNACHTS",
+        /*  3 */  "CHAPPYOHALB",
+        /*  4 */  "ZWEIGNEWUST",
+        /*  5 */  "BIRTHDAYEAR",
+        /*  6 */  "DREINSECHSÄ",
+        /*  7 */  "SIEBENDVIVI",
+        /*  8 */  "ACHTZEHNEUN",
+        /*  9 */  "ZWÖLFÜNFELF",
+        /* 10 */  "MJXVIERQUHR",
+      ];
+
+      var FILL_IN_EMPTY_SPOTS = true;
+
+      var COUNT_PIXELS = 0;
+
+      for (var row = 0; row < letters.length; ++row)
+        COUNT_PIXELS += letters[row].length;
+
+      var PHASE_PER_PIXEL = [];
+
+      for (var row = 0; row < letters.length; ++row)
+        for (var col = 0; col < letters[row].length; ++col)
+          //PHASE_PER_PIXEL.push((col << 4) & 0xFF);
+          PHASE_PER_PIXEL.push((row * 16 + col * 16) & 0xFF);
+      
+
+      function Word(word, rowFrom, rowTo)
+      {
+        if (rowFrom == undefined)
+          rowFrom = 0;
+        else if (rowFrom < 0)
+          rowFrom += letters.length;
+
+        if (rowTo == undefined)
+          rowTo = letters.length - 1;
+        else if (rowTo < 0)
+          rowTo += letters.length;
+
+        this.index = 0;
+        this.length = word.length;
+
+        var row;
+
+        for (row = 0; row < rowFrom; ++row)
+          this.index += letters[row].length;
+
+        for (row = rowFrom; row <= rowTo; ++row) {
+          var offset = letters[row].indexOf(word);
+
+          if (offset < 0) {
+            this.index += letters[row].length;
+          }
+          else {
+            this.index += offset;
+            return;
+          }
+        }
+
+        throw "Word \"" + word + "\" not found in rows " + rowFrom + ".." + rowTo;
+      }
+
+
+      word_STATIC_ES       = new Word("ES",       0,  0);
+      word_STATIC_IST      = new Word("IST",      0,  0);
+      word_STATIC_UHR      = new Word("UHR",     -1, -1);
+      word_MIN_FUENF       = new Word("FÜNF",     0,  3);
+      word_MIN_ZEHN        = new Word("ZEHN",     0,  3);
+      word_MIN_VIERTEL     = new Word("VIERTEL",  0,  3);
+      word_MIN_VOR         = new Word("VOR",      0,  3);
+      word_MIN_NACH        = new Word("NACH",     0,  3);
+      word_MIN_HALB        = new Word("HALB",     0,  3);
+      word_HOUR_EIN        = new Word("EIN",      4, -1);
+      word_HOUR_EINS       = new Word("EINS",     4, -1);
+      word_HOUR_ZWEI       = new Word("ZWEI",     4, -1);
+      word_HOUR_DREI       = new Word("DREI",     4, -1);
+      word_HOUR_VIER       = new Word("VIER",     4, -1);
+      word_HOUR_FUENF      = new Word("FÜNF",     4, -1);
+      word_HOUR_SECHS      = new Word("SECHS",    4, -1);
+      word_HOUR_SIEBEN     = new Word("SIEBEN",   4, -1);
+      word_HOUR_ACHT       = new Word("ACHT",     4, -1);
+      word_HOUR_NEUN       = new Word("NEUN",     4, -1);
+      word_HOUR_ZEHN       = new Word("ZEHN",     4, -1);
+      word_HOUR_ELF        = new Word("ELF",      4, -1);
+      word_HOUR_ZWOELF     = new Word("ZWÖLF",    4, -1);
+      word_EXTRA_HAPPY     = new Word("HAPPY",    0, -1);
+      word_EXTRA_BIRTHDAY  = new Word("BIRTHDAY", 0, -1);
+      word_EXTRA_VIVI      = new Word("VIVI",     0, -1);
+      word_EXTRA_NEW       = new Word("NEW",      0, -1);
+      word_EXTRA_YEAR      = new Word("YEAR",     0, -1);
+
+      var countLetters = {
+        "A" : 0, "B" : 0, "C" : 0, "D" : 0, "E" : 0, "F" : 0,
+        "G" : 0, "H" : 0, "I" : 0, "J" : 0, "K" : 0, "L" : 0,
+        "M" : 0, "N" : 0, "O" : 0, "P" : 0, "Q" : 0, "R" : 0,
+        "S" : 0, "T" : 0, "U" : 0, "V" : 0, "W" : 0, "X" : 0,
+        "Y" : 0, "Z" : 0, "Ä" : 0, "Ö" : 0, "Ü" : 0
+      };
+
+      var emptySpots = [];
+
+      for (var row = 0; row < letters.length; ++row) {
+        for (var col = 0; col < letters[row].length; ++col) {
+          var letter = letters[row].substr(col, 1);
+          if (letter in countLetters) {
+            countLetters[letter] += 1;
+          }
+          else {
+            emptySpots.push({
+              "row" : row,
+              "col" : col
+            });
+          }
+        }
+      }
+
+      if (FILL_IN_EMPTY_SPOTS) {
+        var lettersUnused = [];
+
+        for (var letter in countLetters)
+          if (countLetters[letter] == 0)
+            lettersUnused.push(letter);
+
+        if (lettersUnused.length > 0) {
+          console.log("Unused letters: " + lettersUnused);
+
+          if (lettersUnused.length > emptySpots.length)
+            throw "There are fewer empty spots (" + emptySpots.length + ") than unused letters (" + lettersUnused + ")";
+
+          for (var iLetterUnused = 0; iLetterUnused < lettersUnused.length; ++iLetterUnused) {
+            var iEmptySpot = Math.floor(Math.random() * emptySpots.length);
+            var emptySpot = emptySpots[iEmptySpot];
+
+            var letterUnused = lettersUnused[iLetterUnused];
+
+            letters[emptySpot.row] =
+                letters[emptySpot.row].substring(0, emptySpot.col) + letterUnused
+              + letters[emptySpot.row].substring(emptySpot.col + 1);
+
+            emptySpots.splice(iEmptySpot, 1);
+          }
+        }
+
+        var lettersPadding = [
+          "C", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ü"
+        ];
+
+        while (emptySpots.length) {
+          var emptySpot = emptySpots.pop();
+
+          for (;;) {
+            var iLetterPadding = Math.floor(Math.random() * lettersPadding.length);
+            var letterPadding = lettersPadding[iLetterPadding];
+
+            var letterLeft  = letters[emptySpot.row].slice(emptySpot.col - 1, emptySpot.col);
+            var letterRight = letters[emptySpot.row].slice(emptySpot.col + 1, emptySpot.col + 2);
+
+            if (letterPadding != letterLeft && letterPadding != letterRight) {
+              letters[emptySpot.row] =
+                  letters[emptySpot.row].substring(0, emptySpot.col) + letterPadding
+                + letters[emptySpot.row].substring(emptySpot.col + 1);
+
+              break;
+            }
+          }
+        }
+      }
+
+
+      function HSL(hue, saturation, lightness)
+      {
+        this.hue        = hue & 0xFF
+        this.saturation = Math.max(0x00, Math.min(0xFF, saturation));
+        this.lightness  = Math.max(0x00, Math.min(0xFF, lightness));
+      }
+
+
+      HSL.prototype.toString = function()
+      {
+        return "hsl("
+          + Math.round(this.hue        / 0xFF * 360)       + ","
+          + Math.round(this.saturation / 0xFF * 100) + "%" + ","
+          + Math.round(this.lightness  / 0xFF * 100) + "%" + ")";
+      }
+
+
+      function State()
+      {
+        this.bitmapTime  = [];
+        this.bitmapExtra = [];
+
+        for (var row = 0; row < letters.length; ++row) {
+          for (var col = 0; col < letters[row].length; ++col) {
+            this.bitmapTime .push(false);
+            this.bitmapExtra.push(false);
+          }
+        }
+
+        this.colorOff  = new HSL(0x00, 0x00, 0x00);
+        this.colorTime = new HSL(0x00, 0x00, 0x80);
+      }
+
+
+      State.prototype.hasChangedSince = function(statePrev)
+      {
+        return (this.bitmapTime .toString() != statePrev.bitmapTime .toString()
+             || this.bitmapExtra.toString() != statePrev.bitmapExtra.toString())
+      }
+
+
+      State.prototype.setTimeWord = function(word)
+      {
+        for (var index = word.index; index < word.index + word.length; ++index)
+          this.bitmapTime[index] = true;
+      }
+
+
+      State.prototype.renderTime = function(hour, minute)
+      {
+        this.setTimeWord(word_STATIC_ES);
+        this.setTimeWord(word_STATIC_IST);
+
+        var show_STATIC_UHR;
+
+        switch (Math.floor(minute / 5)) {
+          case  0:                                                                                                                  show_STATIC_UHR = true;   break;
+          case  1:  this.setTimeWord(word_MIN_FUENF);   this.setTimeWord(word_MIN_NACH);                                            show_STATIC_UHR = false;  break;
+          case  2:  this.setTimeWord(word_MIN_ZEHN);    this.setTimeWord(word_MIN_NACH);                                            show_STATIC_UHR = false;  break;
+          case  3:  this.setTimeWord(word_MIN_VIERTEL); this.setTimeWord(word_MIN_NACH);                                            show_STATIC_UHR = false;  break;
+          case  4:  this.setTimeWord(word_MIN_ZEHN);    this.setTimeWord(word_MIN_VOR);  this.setTimeWord(word_MIN_HALB);  ++hour;  show_STATIC_UHR = false;  break;
+          case  5:  this.setTimeWord(word_MIN_FUENF);   this.setTimeWord(word_MIN_VOR);  this.setTimeWord(word_MIN_HALB);  ++hour;  show_STATIC_UHR = false;  break;
+          case  6:                                                                       this.setTimeWord(word_MIN_HALB);  ++hour;  show_STATIC_UHR = false;  break;
+          case  7:  this.setTimeWord(word_MIN_FUENF);   this.setTimeWord(word_MIN_NACH); this.setTimeWord(word_MIN_HALB);  ++hour;  show_STATIC_UHR = false;  break;
+          case  8:  this.setTimeWord(word_MIN_ZEHN);    this.setTimeWord(word_MIN_NACH); this.setTimeWord(word_MIN_HALB);  ++hour;  show_STATIC_UHR = false;  break;
+          case  9:  this.setTimeWord(word_MIN_VIERTEL); this.setTimeWord(word_MIN_VOR);                                    ++hour;  show_STATIC_UHR = false;  break;
+          case 10:  this.setTimeWord(word_MIN_ZEHN);    this.setTimeWord(word_MIN_VOR);                                    ++hour;  show_STATIC_UHR = false;  break;
+          case 11:  this.setTimeWord(word_MIN_FUENF);   this.setTimeWord(word_MIN_VOR);                                    ++hour;  show_STATIC_UHR = false;  break;
+        }
+
+        switch (hour % 12) {
+          case  0:  this.setTimeWord(                  word_HOUR_ZWOELF              );  break;
+          case  1:  this.setTimeWord(show_STATIC_UHR ? word_HOUR_EIN : word_HOUR_EINS);  break;
+          case  2:  this.setTimeWord(                  word_HOUR_ZWEI                );  break;
+          case  3:  this.setTimeWord(                  word_HOUR_DREI                );  break;
+          case  4:  this.setTimeWord(                  word_HOUR_VIER                );  break;
+          case  5:  this.setTimeWord(                  word_HOUR_FUENF               );  break;
+          case  6:  this.setTimeWord(                  word_HOUR_SECHS               );  break;
+          case  7:  this.setTimeWord(                  word_HOUR_SIEBEN              );  break;
+          case  8:  this.setTimeWord(                  word_HOUR_ACHT                );  break;
+          case  9:  this.setTimeWord(                  word_HOUR_NEUN                );  break;
+          case 10:  this.setTimeWord(                  word_HOUR_ZEHN                );  break;
+          case 11:  this.setTimeWord(                  word_HOUR_ELF                 );  break;
+        }
+
+        if (show_STATIC_UHR)
+          this.setTimeWord(word_STATIC_UHR);
+      }
+
+
+      State.prototype.setExtraWord = function(word)
+      {
+        for (var index = word.index; index < word.index + word.length; ++index)
+          this.bitmapExtra[index] = true;
+      }
+
+
+      State.prototype.renderExtra = function(which)
+      {
+        switch (which) {
+          case 0:
+            break;
+
+          case 1:
+            this.setExtraWord(word_EXTRA_HAPPY);
+            this.setExtraWord(word_EXTRA_BIRTHDAY);
+            this.setExtraWord(word_EXTRA_VIVI);
+            break;
+
+          case 2:
+            this.setExtraWord(word_EXTRA_HAPPY);
+            this.setExtraWord(word_EXTRA_NEW);
+            this.setExtraWord(word_EXTRA_YEAR);
+            break;
+
+          default:
+            throw "Unsupported choice for extra: " + which;
+        }
+      }
+
+
+      State.prototype.getPhase = function(index)
+      {
+        return PHASE_PER_PIXEL[index];
+      }
+
+
+      State.prototype.getColor = function(index, millis)
+      {
+        if (this.bitmapTime[index]) {
+          return this.colorTime;
+        }
+
+        if (this.bitmapExtra[index]) {
+          //return new HSL(((millis >> 3) - this.getPhase(index)) & 0xFF, 0x80, 0x80);
+          return new HSL(((millis >> 4) - this.getPhase(index)) & 0xFF, 0x80, 0x60);
+        }
+
+        return this.colorOff;
+      }
+
+
+      var statePrev = new State();
+      var stateCurr = new State();
+
+
+      function calcTransitionValue(valuePrev, valueCurr, alpha)
+      {
+        return valuePrev + (valueCurr - valuePrev) * alpha;
+      }
+
+
+      //var TRANSITION_TYPE = { name: "through-white" };
+      //var TRANSITION_TYPE = { name: "through-gray" };
+      var TRANSITION_TYPE = { name: "through-color", color: 40 };
+
+
+      function calcTransitionColor(index, millis, alpha)
+      {
+        var colorPrev = statePrev.getColor(index, millis);
+        var colorCurr = stateCurr.getColor(index, millis);
+
+        if (alpha < 0.5) {
+          var alphaOut = alpha / 0.5;  // 0.0 .. 1.0
+
+          switch (TRANSITION_TYPE.name) {
+            case "through-white":
+              return new HSL(
+                colorPrev.hue,
+                colorPrev.saturation,
+                calcTransitionValue(colorPrev.lightness, 0xFF, alphaOut));
+
+            case "through-gray":
+              return new HSL(
+                colorPrev.hue,
+                calcTransitionValue(colorPrev.saturation, 0x00, alphaOut),
+                calcTransitionValue(colorPrev.lightness, colorPrev.lightness + colorCurr.lightness + 0x40, alphaOut));
+
+            case "through-color":
+              return new HSL(
+                calcTransitionValue(colorPrev.hue, (TRANSITION_TYPE.color / 360 * 0x100 + 0.5), alphaOut),
+                calcTransitionValue(colorPrev.saturation, 0x40, alphaOut),
+                calcTransitionValue(colorPrev.lightness, colorPrev.lightness + colorCurr.lightness + 0x40, alphaOut));
+
+            default:
+              throw "Unsupported transition type: " + TRANSITION_TYPE;
+          }
+        }
+        else {
+          var alphaIn = alpha / 0.5 - 1.0;  // 0.0 .. 1.0
+
+          switch (TRANSITION_TYPE.name) {
+            case "through-white":
+              return new HSL(
+                colorCurr.hue,
+                colorCurr.saturation,
+                calcTransitionValue(0xFF, colorCurr.lightness, alphaIn));
+
+            case "through-gray":
+              return new HSL(
+                colorCurr.hue,
+                calcTransitionValue(0x00, colorCurr.saturation, alphaIn),
+                calcTransitionValue(colorPrev.lightness + colorCurr.lightness + 0x40, colorCurr.lightness,  alphaIn));
+
+            case "through-color":
+              return new HSL(
+                calcTransitionValue((TRANSITION_TYPE.color / 360 * 0x100 + 0.5), colorCurr.hue, alphaIn),
+                calcTransitionValue(0x40, colorCurr.saturation, alphaIn),
+                calcTransitionValue(colorPrev.lightness + colorCurr.lightness + 0x40, colorCurr.lightness,  alphaIn));
+
+            default:
+              throw "Unsupported transition type: " + TRANSITION_TYPE;
+          }
+        }
+      }
+
+
+      function getMillis()
+      {
+        return new Date().getTime();
+      }
+
+
+      var TRANSITION_OFFSET_PER_PIXEL = [];
+
+      var TRANSITION_LENGTH_PER_PIXEL = 500;
+      var TRANSITION_LENGTH_GLOBAL = 0;
+
+      for (var row = 0; row < letters.length; ++row) {
+        for (var col = 0; col < letters[row].length; ++col) {
+          var offset = (row + col) * 50;
+
+          TRANSITION_OFFSET_PER_PIXEL.push(offset);
+
+          if (TRANSITION_LENGTH_GLOBAL < offset + TRANSITION_LENGTH_PER_PIXEL)
+            TRANSITION_LENGTH_GLOBAL = offset + TRANSITION_LENGTH_PER_PIXEL;
+        }
+      }
+
+
+      var millisTransitionStart;
+
+
+      function calcTransitionAlpha(index, millis)
+      {
+        var millisTransitionStartPixel = millisTransitionStart + TRANSITION_OFFSET_PER_PIXEL[index];
+
+        if (millis < millisTransitionStartPixel)
+          return 0.0;
+
+        var millisRelativePixel = millis - millisTransitionStartPixel;
+
+        if (millisRelativePixel > TRANSITION_LENGTH_PER_PIXEL)
+          return 1.0;
+
+        return (millisRelativePixel / TRANSITION_LENGTH_PER_PIXEL);
+      }
+
+
+      function display()
+      {
+        var millis = getMillis();
+
+        for (var index = 0; index < COUNT_PIXELS; ++index) {
+          //$("td#index-" + index).css({"color" : stateCurr.getColor(index, millis) });
+          $("td#index-" + index).css({"color" : calcTransitionColor(index, millis, calcTransitionAlpha(index, millis)) });
+        }
+
+        startOrStopAnimationTimer(millis);
+      }
+
+
+      var intervalDisplay;
+
+
+      function startOrStopAnimationTimer(millis)
+      {
+        var hasAnimation = (extra != 0 || millis < millisTransitionStart + TRANSITION_LENGTH_GLOBAL);
+        var isAnimationTimerRunning = (intervalDisplay != undefined);
+
+        if (!isAnimationTimerRunning && hasAnimation) {
+          intervalDisplay = window.setInterval(display, 20);
+        }
+        else if (isAnimationTimerRunning && !hasAnimation) {
+          window.clearInterval(intervalDisplay);
+          intervalDisplay = undefined;
+        }
+      }
+
+
+      var hour   = 0;
+      var minute = 0;
+      var extra  = 0;
+
+
+      function updateState()
+      {
+        $("div#time").text(
+          (hour   < 10 ? "0" : "") + hour + ":" +
+          (minute < 10 ? "0" : "") + minute);
+
+        var stateUpdated = new State();
+
+        stateUpdated.renderTime(hour, minute);
+        stateUpdated.renderExtra(extra);
+
+        if (stateUpdated.hasChangedSince(stateCurr)) {
+          millisTransitionStart = getMillis();
+
+          statePrev = stateCurr;
+          stateCurr = stateUpdated;
+
+          display();
+        }
+      }
+
+
+      function switchExtra()
+      {
+        extra += 1;
+
+        if (extra > 2)
+          extra = 0;
+
+        updateState();
+      }
+
+
+      function incrementTime(deltaMinute)
+      {
+        minute += deltaMinute;
+
+        while (minute > 59) {
+          hour += 1;
+          minute -= 60;
+        }
+
+        while (hour > 23) {
+          hour -= 24;
+        }
+
+        updateState();
+      }
+
+
+      function decrementTime(deltaMinute)
+      {
+        minute -= deltaMinute;
+
+        while (minute < 0) {
+          hour -= 1;
+          minute += 60;
+        }
+
+        while (hour < 0) {
+          hour += 24;
+        }
+
+        updateState();
+      }
+
+
+      var timeoutAutoIncrement;
+
+
+      function autoIncrement()
+      {
+        incrementTime(1);
+
+        window.clearTimeout(timeoutAutoIncrement);
+        timeoutAutoIncrement = window.setTimeout(autoIncrement, 1000);
+      }
+
+
+      $(function() {
+        var index = 0;
+
+        for (var row = 0; row < letters.length; ++row) {
+          var tr = $("<tr>").appendTo("table#clock");
+
+          for (var col = 0; col < letters[row].length; ++col) {
+            var letter = letters[row].substr(col, 1);
+            $("<td>").attr("id", "index-" + index++).text(letter).appendTo(tr);
+          }
+        }
+
+        $("table#clock").mousedown(function(event) {
+          if (event.which == 1)
+            switchExtra();
+
+          startOrStopAnimationTimer(getMillis());
+        });
+
+        $("body").keydown(function(event) {
+          var resetAutoIncrement = false;
+
+          switch (event.which) {
+            case 13:  // enter
+              switchExtra();
+              break;
+
+            case 32:  // space
+              resetAutoIncrement = true;
+              break;
+              
+            case 33:  // page up
+              decrementTime(5);
+              resetAutoIncrement = true;
+              break;
+
+            case 34:  // page down
+              incrementTime(5);
+              resetAutoIncrement = true;
+              break;
+
+            case 37:  // arrow left
+            case 38:  // arrow up
+              decrementTime(1);
+              resetAutoIncrement = true;
+              break;
+
+            case 39:  // arrow right
+            case 40:  // arrow down
+              incrementTime(1);
+              resetAutoIncrement = true;
+              break;
+          }
+
+          if (resetAutoIncrement) {
+            window.clearTimeout(timeoutAutoIncrement);
+            timeoutAutoIncrement = window.setTimeout(autoIncrement, 20000);
+          }
+
+          startOrStopAnimationTimer(getMillis());
+        });
+
+        updateState();
+
+        timeoutAutoIncrement = window.setTimeout(autoIncrement, 10000);
+      });
+    </script>
+  </head>
+
+  <body>
+    <div id="time"></div>
+    <table id="clock"></table>
+  </body>
+</html>
