@@ -160,6 +160,20 @@ protected:
 
 ///////////////////////////////////////////////////////////////////////////////
 //
+//  TransitionNone
+//
+
+class TransitionNone
+  : public Transition
+{
+public:
+  virtual void prepare(uint32_t const time) override;
+  virtual CRGB color(Layer::Iterator const iterator, CRGB const colorFrom, CRGB const colorTo) const override;
+};
+
+
+///////////////////////////////////////////////////////////////////////////////
+//
 //  TransitionWave
 //
 
@@ -194,6 +208,28 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////
 //
+//  TransitionBurn
+//
+
+class TransitionBurn
+  : public Transition
+{
+public:
+  TransitionBurn(CRGB const colorBurn, uint16_t const duration);
+
+  virtual void prepare(uint32_t const time) override;
+  virtual CRGB color(Layer::Iterator const iterator, CRGB const colorFrom, CRGB const colorTo) const override;
+
+private:
+  CRGB const colorBurn;
+
+  uint16_t const speed;
+  uint16_t alpha;
+};
+
+
+///////////////////////////////////////////////////////////////////////////////
+//
 //  Display
 //
 
@@ -213,7 +249,7 @@ class DisplayClock
   : public Display
 {
 public:
-  DisplayClock(CRGB const colorOff, CRGB const colorTime, CHSV const colorExtra, Transition& transition);
+  DisplayClock(CRGB const colorOff, CRGB const colorTime, CHSV const colorExtra);
 
   struct State
   {
@@ -224,7 +260,7 @@ public:
     bool operator!=(State const & state) const;
   };
 
-  void update(State const state, uint32_t const time);
+  void update(uint32_t const time, State const state, Transition& transition = transitionNone);
 
   bool isAnimating() const;
   bool isTransitioning() const;
@@ -232,6 +268,8 @@ public:
   virtual CRGB color(Layer::Iterator const iterator) const override;
 
 private:
+  static TransitionNone transitionNone;
+
   CRGB const colorOff;
   CRGB const colorTime;
   CHSV const colorExtra;
@@ -241,7 +279,7 @@ private:
   State statePrev;
   State stateCurr;
 
-  Transition& transition;
+  Transition* transition;
 
   CRGB color(State const & state, Layer::Iterator const iterator) const;
 };
@@ -424,6 +462,24 @@ inline uint8_t Transition::calcAlpha(uint16_t const progress, uint16_t const spe
 
 ///////////////////////////////////////////////////////////////////////////////
 //
+//  TransitionNone (implementation)
+//
+
+void TransitionNone::prepare(uint32_t const time)
+{
+  if (!this->idle)
+    this->stop();
+}
+
+
+CRGB TransitionNone::color(Layer::Iterator const iterator, CRGB const colorFrom, CRGB const colorTo) const
+{
+  return colorTo;
+}
+
+
+///////////////////////////////////////////////////////////////////////////////
+//
 //  TransitionWave (implementation)
 //
 
@@ -520,19 +576,71 @@ CRGB TransitionWave::color(Layer::Iterator const iterator, CRGB const colorFrom,
 
 ///////////////////////////////////////////////////////////////////////////////
 //
+//  TransitionBurn
+//
+
+TransitionBurn::TransitionBurn(CRGB const colorBurn, uint16_t const duration)
+  : colorBurn (colorBurn)
+  , speed (calcSpeed(duration))
+{}
+
+
+void TransitionBurn::prepare(uint32_t const time)
+{
+  if (this->idle)
+    return;
+
+  uint16_t const progress = time - this->timeStart;
+
+  uint8_t const alpha = calcAlpha(progress, this->speed);
+
+  if (alpha < 255) {
+    this->alpha = quadwave8(alpha / 2);
+  }
+  else {
+    this->stop();
+  }
+}
+
+
+CRGB TransitionBurn::color(Layer::Iterator const iterator, CRGB const colorFrom, CRGB const colorTo) const
+{
+  if (this->idle)
+    return colorTo;
+
+  if (this->alpha ==   0) return colorFrom;
+  if (this->alpha == 255) return colorTo;
+
+  if (colorFrom == colorTo)
+    return colorFrom;
+
+  uint8_t const lumaFrom = colorFrom.getLuma();
+  uint8_t const lumaTo   = colorTo  .getLuma();
+
+  if (lumaTo > lumaFrom)
+         return blend(this->colorBurn, colorTo, this->alpha);
+    else return blend(colorFrom,       colorTo, this->alpha);
+}
+
+
+///////////////////////////////////////////////////////////////////////////////
+//
 //  DisplayClock (implementation)
 //
 
-inline DisplayClock::DisplayClock(CRGB const colorOff, CRGB const colorTime, CHSV const colorExtra, Transition& transition)
+TransitionNone DisplayClock::transitionNone;
+
+
+inline DisplayClock::DisplayClock(CRGB const colorOff, CRGB const colorTime, CHSV const colorExtra)
   : colorOff   (colorOff)
   , colorTime  (colorTime)
   , colorExtra (colorExtra)
   , time       (0)
-  , transition (transition)
+  , transition (&transitionNone)
 {}
 
 
-inline void DisplayClock::update(State const state, uint32_t const time)
+inline void DisplayClock::update(uint32_t const time, State const state, Transition& transition)
 {
   this->time = time;
 
@@ -540,36 +648,37 @@ inline void DisplayClock::update(State const state, uint32_t const time)
     this->statePrev = this->stateCurr;
     this->stateCurr = state;
 
-    this->transition.start(time);
+    this->transition = &transition;
+    this->transition->start(time);
   }
 
-  if (this->transition.isRunning())
-    this->transition.prepare(time);
+  if (this->transition->isRunning())
+    this->transition->prepare(time);
 }
 
 
 inline bool DisplayClock::isAnimating() const
 {
-  return (this->transition.isRunning() || this->stateCurr.layerExtra);
+  return (this->transition->isRunning() || this->stateCurr.layerExtra);
 }
 
 
 inline bool DisplayClock::isTransitioning() const
 {
-  return this->transition.isRunning();
+  return this->transition->isRunning();
 }
 
 
 CRGB DisplayClock::color(Layer::Iterator const iterator) const
 {
-  if (this->transition.isIdle()) {
+  if (this->transition->isIdle()) {
     return this->color(this->stateCurr, iterator);
   }
   else {
     CRGB const colorFrom = this->color(this->statePrev, iterator);
     CRGB const colorTo   = this->color(this->stateCurr, iterator);
 
-    return this->transition.color(iterator, colorFrom, colorTo);
+    return this->transition->color(iterator, colorFrom, colorTo);
   }
 }
 

@@ -279,12 +279,17 @@ TransitionWave transitionWave
   [] (uint8_t const iRow, uint8_t const iCol) -> uint16_t { return 1000; }
 );
 
+TransitionBurn transitionBurn
+(
+  CHSV (0x20, 0x80, 0xFF),
+  1000
+);
+
 DisplayClock display
 (
   CHSV (0x00, 0x00, 0x00),
   CHSV (0x00, 0x00, 0x80),
-  CHSV (0x00, 0xFF, 0x80),
-  transitionWave
+  CHSV (0x00, 0xFF, 0x80)
 );
 
 
@@ -306,6 +311,8 @@ void updateDisplay()
 
   if (stateReceiver == DCF77_STATE_PENDING) {
     renderExtra(state.layerExtra, EXTRA_BIRTHDAY);
+
+    display.update(millis(), state, transitionWave);
   }
   else {
     if (   datetime.Month  == 12
@@ -319,19 +326,24 @@ void updateDisplay()
       //   Happy Birthday Vivi
       //   Happy New Year
       renderCountdown(state.layerExtra, 60 - datetime.Second);
+
+      display.update(millis(), state, transitionBurn);
     }
     else {
       // Normal time display
       renderTime(state.layerTime, datetime.Hour, datetime.Minute);
+
+      // Extra text display
+      //   Happy Birthday Vivi
+      //   Happy New Year
+      if (datetime.Month == 1 && datetime.Day == 1)
+        renderExtra(state.layerExtra, EXTRA_NEWYEAR);
+      else if (datetime.Month == 12 && datetime.Day == 12)
+        renderExtra(state.layerExtra, EXTRA_BIRTHDAY);
+
+      display.update(millis(), state, transitionWave);
     }
-
-    if (datetime.Month == 1 && datetime.Day == 1)
-      renderExtra(state.layerExtra, EXTRA_NEWYEAR);
-    else if (datetime.Month == 12 && datetime.Day == 12)
-      renderExtra(state.layerExtra, EXTRA_BIRTHDAY);
   }
-
-  display.update(state, millis());
 
   for (Layer::Iterator iterator; iterator != Layout::size(); ++iterator)
     leds[iterator] = CRGB(display.color(iterator));
