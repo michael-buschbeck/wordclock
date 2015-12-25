@@ -568,7 +568,7 @@ void loop()
         case 't':
         case 'T':
           // Test countdown to Happy Birthday Vivi
-          setTime(23, 59, 40, 11, 12, 2015);
+          setTime(23, 59, 45, 11, 12, 2015);
           stateReceiver = DCF77_STATE_IGNORED;
           break;
       }
