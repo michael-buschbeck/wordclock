@@ -558,7 +558,7 @@ CRGB TransitionWave::color(Layer::Iterator const iterator, CRGB const colorFrom,
     colorPeak = this->colorVia;
   }
   else {
-    uint16_t lumaPeak = colorBoth.getLuma() + this->lumaVia;
+    uint16_t const lumaPeak = colorBoth.getLuma() + this->lumaVia;
 
     colorPeak = this->colorViaMax;
 
