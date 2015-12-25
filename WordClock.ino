@@ -539,8 +539,8 @@ void loop()
 
     nFrames = 0;
 
-    durationWorking   = 0;
-    durationIdle = 0;
+    durationWorking = 0;
+    durationIdle    = 0;
 
     if (Serial.available()) {
       uint8_t const input = Serial.read();
