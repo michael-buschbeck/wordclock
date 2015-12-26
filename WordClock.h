@@ -274,6 +274,13 @@ private:
   CRGB const colorTime;
   CHSV const colorExtra;
 
+  struct Pixel
+  {
+    uint8_t phase;
+  };
+
+  Pixel pixels[Layout::size()];
+
   uint32_t time;
 
   State statePrev;
@@ -637,7 +644,15 @@ inline DisplayClock::DisplayClock(CRGB const colorOff, CRGB const colorTime, CHS
   , colorExtra (colorExtra)
   , time       (0)
   , transition (&transitionNone)
-{}
+{
+  for (uint8_t iRow = 0; iRow < Layout::rows(); ++iRow) {
+    for (uint8_t iCol = 0; iCol < Layout::cols(); ++iCol) {
+      uint8_t const index = Layout::indexFromCoords(iRow, iCol);
+
+      this->pixels[index].phase = ((iRow + iCol) * colorExtra.hue) & 0xFF;
+    }
+  }
+}
 
 
 inline void DisplayClock::update(uint32_t const time, State const state, Transition& transition)
@@ -689,10 +704,10 @@ CRGB DisplayClock::color(State const & state, Layer::Iterator const iterator) co
     return this->colorTime;
 
   if (iterator.get(state.layerExtra)) {
-    uint8_t const phasePixel = iterator * 16;
+    uint8_t const phase = this->pixels[iterator].phase;
 
     return CHSV (
-      this->time / 16 - phasePixel,
+      this->time / 16 - phase,
       this->colorExtra.saturation,
       this->colorExtra.value
     );
