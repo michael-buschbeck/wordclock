@@ -399,11 +399,12 @@ void printTime()
 //  Timers
 //
 
-Timer timerReceiverOn     (Timer::ONCE | Timer::STOPPED,  5000);
-Timer timerReceiverAdjust (Timer::ONCE | Timer::STOPPED, 30000);
+Timer timerReceiverOn     (Timer::ONCE   | Timer::STOPPED,         3UL * 1000UL);
+Timer timerReceiverAdjust (Timer::ONCE   | Timer::STOPPED,        30UL * 1000UL);
+Timer timerReceiverReset  (Timer::REPEAT | Timer::STARTED, 60UL * 60UL * 1000UL);
 
-Timer timerDisplay (Timer::REPEAT | Timer::STARTED | Timer::IMMEDIATE,   10);
-Timer timerStatus  (Timer::REPEAT | Timer::STOPPED | Timer::DELAYED,   1000);
+Timer timerDisplay (Timer::REPEAT | Timer::STARTED | Timer::IMMEDIATE,   10UL);
+Timer timerStatus  (Timer::REPEAT | Timer::STOPPED | Timer::DELAYED,   1000UL);
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -481,6 +482,7 @@ void loop()
       else {
         Serial.println(F("DCF77 time adjustment scheduled in 30 seconds."));
         timerReceiverAdjust.start();
+        timerReceiverReset .start();
       }
     }
   }
@@ -507,6 +509,13 @@ void loop()
 
       stateReceiver = DCF77_STATE_RECEIVED;
     }
+  }
+
+  
+  if (timerReceiverReset.due()) {
+    Serial.println(F("DCF77 receiver switched off for automatic periodic reset."));
+    digitalWrite(pinReceiverOff, HIGH);
+    timerReceiverOn.start();
   }
 
 
@@ -562,7 +571,8 @@ void loop()
         case 'R':
           Serial.println(F("DCF77 receiver switched off for reset per user request."));
           digitalWrite(pinReceiverOff, HIGH);
-          timerReceiverOn.start();
+          timerReceiverOn   .start();
+          timerReceiverReset.start();
           break;
 
         case 't':
