@@ -14,6 +14,13 @@
 #include <FastLED.h>
 #include <TimeLib.h>
 
+#define SDA_PIN 6
+#define SDA_PORT PORTD
+#define SCL_PIN 7
+#define SCL_PORT PORTD
+#define I2C_FASTMODE 1
+#include <SoftI2CMaster.h>
+
 #include <DCF77.h>
 #include <Timer.h>
 #include "WordClock.h"
@@ -164,9 +171,17 @@ void renderCountdown(Layer& layer, uint8_t const seconds)
 //  Pins
 //
 
-constexpr uint8_t pinLed          = A0;  // OUTPUT
-constexpr uint8_t pinReceiverData = A1;  // INPUT
-constexpr uint8_t pinReceiverOff  = A2;  // OUTPUT
+constexpr uint8_t pinLed               = A0;  // OUTPUT
+
+constexpr uint8_t pinClockReceiverData = A1;  // INPUT
+constexpr uint8_t pinClockReceiverOff  = A2;  // OUTPUT
+
+constexpr uint8_t pinClockRealtimeGND  =  4;  // OUTPUT, LOW
+constexpr uint8_t pinClockRealtimeVCC  =  5;  // variable
+constexpr uint8_t pinClockRealtimeSDA  =  6;  // variable (port D, pin 4)
+constexpr uint8_t pinClockRealtimeSCL  =  7;  // variable (port D, pin 5)
+
+constexpr uint8_t i2cClockRealtime = 0b01101000;
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -174,18 +189,8 @@ constexpr uint8_t pinReceiverOff  = A2;  // OUTPUT
 //  DCF77 Receiver
 //
 
-enum DCF77State
-{
-  DCF77_STATE_PENDING,
-  DCF77_STATE_RECEIVED,
-  DCF77_STATE_IGNORED
-};
-
-
 DCF77Timestamp timestamp;
-bool processTimestamp = false;
-
-DCF77State stateReceiver = DCF77_STATE_PENDING;
+volatile bool processTimestamp = false;
 
 
 void receivedTimestamp(DCF77Timestamp const & timestampReceived)
@@ -207,7 +212,7 @@ DCF77Receiver::Bitptr bitptrSamplesReceived;
 DCF77Receiver::Bitptr bitptrSamplesDisplayed;
 
 
-void setupReceiver()
+void setupClockReceiver()
 {
   cli();
   
@@ -237,7 +242,7 @@ void setupReceiver()
 
 ISR(TIMER1_COMPA_vect)
 {
-  bool const sample = (digitalRead(pinReceiverData) == 0 ? true : false);
+  bool const sample = (digitalRead(pinClockReceiverData) == 0 ? true : false);
 
   bitptrSamplesReceived.set(samplesReceived, sample);
 
@@ -302,57 +307,178 @@ void setupDisplay()
 }
 
 
-void updateDisplay()
+void updateDisplayIntro()
+{
+  DisplayClock::State state;
+
+  renderExtra(state.layerExtra, EXTRA_BIRTHDAY);
+
+  display.update(millis(), state, transitionWave);
+}
+
+
+void updateDisplayTime()
 {
   TimeElements datetime;
   breakTime(now(), datetime);
 
   DisplayClock::State state;
 
-  if (stateReceiver == DCF77_STATE_PENDING) {
-    renderExtra(state.layerExtra, EXTRA_BIRTHDAY);
+  if (   datetime.Month  == 12
+      && (   datetime.Day == 11
+          || datetime.Day == 31)
+      && datetime.Hour   == 23
+      && datetime.Minute == 59
+      && datetime.Second >= 50) {
+        
+    // Countdown to
+    //   Happy Birthday Vivi
+    //   Happy New Year
+    renderCountdown(state.layerExtra, 60 - datetime.Second);
+
+    display.update(millis(), state, transitionBurn);
+  }
+  else {
+    // Normal time display
+    renderTime(state.layerTime, datetime.Hour, datetime.Minute);
+
+    // Extra text display
+    //   Happy Birthday Vivi
+    //   Happy New Year
+    if (datetime.Month == 1 && datetime.Day == 1)
+      renderExtra(state.layerExtra, EXTRA_NEWYEAR);
+    else if (datetime.Month == 12 && datetime.Day == 12)
+      renderExtra(state.layerExtra, EXTRA_BIRTHDAY);
 
     display.update(millis(), state, transitionWave);
   }
-  else {
-    if (   datetime.Month  == 12
-        && (   datetime.Day == 11
-            || datetime.Day == 31)
-        && datetime.Hour   == 23
-        && datetime.Minute == 59
-        && datetime.Second >= 50) {
-          
-      // Countdown to
-      //   Happy Birthday Vivi
-      //   Happy New Year
-      renderCountdown(state.layerExtra, 60 - datetime.Second);
+}
 
-      display.update(millis(), state, transitionBurn);
-    }
-    else {
-      // Normal time display
-      renderTime(state.layerTime, datetime.Hour, datetime.Minute);
 
-      // Extra text display
-      //   Happy Birthday Vivi
-      //   Happy New Year
-      if (datetime.Month == 1 && datetime.Day == 1)
-        renderExtra(state.layerExtra, EXTRA_NEWYEAR);
-      else if (datetime.Month == 12 && datetime.Day == 12)
-        renderExtra(state.layerExtra, EXTRA_BIRTHDAY);
-
-      display.update(millis(), state, transitionWave);
-    }
-  }
-
+void updateLeds()
+{
   for (Layer::Iterator iterator; iterator != Layout::size(); ++iterator)
     leds[iterator] = CRGB(display.color(iterator));
+
+  FastLED.show();
 }
 
 
 ///////////////////////////////////////////////////////////////////////////////
 //
-//  printTime()
+//  DS3231 Real-Time Clock
+//
+
+bool connectedClockRealtime = false;
+
+
+void setupClockRealtime()
+{
+  // Ground reference
+  pinMode(pinClockRealtimeGND, OUTPUT);
+  digitalWrite(pinClockRealtimeGND, LOW);
+
+  // Input voltage (use VCC during I2C initialization)
+  pinMode(pinClockRealtimeVCC, OUTPUT);
+  digitalWrite(pinClockRealtimeVCC, HIGH);
+
+  // Wait until VCC has been established
+  delayMicroseconds(10);
+
+  // Verify I2C communication channel
+  if (i2c_init() && i2c_start((i2cClockRealtime << 1) | I2C_WRITE)) {
+    i2c_write(0x00);
+    i2c_stop();
+    connectedClockRealtime = true;
+  }
+
+  // Input voltage (use battery)
+  pinMode(pinClockRealtimeVCC, INPUT);
+}
+
+
+void writeClockRealtime(TimeElements const & datetime)
+{
+  uint8_t const second  = datetime.Second;
+  uint8_t const minute  = datetime.Minute;
+  uint8_t const hour    = datetime.Hour;
+  uint8_t const weekday = datetime.Wday;
+  uint8_t const day     = datetime.Day;
+  uint8_t const month   = datetime.Month;
+  uint8_t const year    = datetime.Year + (1970 - 2000);
+
+  // Input voltage (use VCC during I2C communication)
+  pinMode(pinClockRealtimeVCC, OUTPUT);
+  digitalWrite(pinClockRealtimeVCC, HIGH);
+
+  // Wait until VCC has been established
+  delayMicroseconds(10);
+
+  // Initiate I2C write communication and write register address
+  i2c_start((i2cClockRealtime << 1) | I2C_WRITE);
+  i2c_write(0x00);
+
+  // Write all time and date registers
+  i2c_write(((second / 10) << 4) | (second % 10));
+  i2c_write(((minute / 10) << 4) | (minute % 10));
+  i2c_write(((hour   / 10) << 4) | (hour   % 10));
+  i2c_write(weekday);
+  i2c_write(((day    / 10) << 4) | (day    % 10));
+  i2c_write(((month  / 10) << 4) | (month  % 10));
+  i2c_write(((year   / 10) << 4) | (year   % 10));
+
+  // Stop I2C write communication
+  i2c_stop();
+
+  // Input voltage (use battery)
+  pinMode(pinClockRealtimeVCC, INPUT);
+}
+
+
+void readClockRealtime(TimeElements& datetime)
+{
+  // Input voltage (use VCC during I2C communication)
+  pinMode(pinClockRealtimeVCC, OUTPUT);
+  digitalWrite(pinClockRealtimeVCC, HIGH);
+
+  // Wait until VCC has been established
+  delayMicroseconds(10);
+
+  // Initiate I2C write communication and write register address
+  i2c_start((i2cClockRealtime << 1) | I2C_WRITE);
+  i2c_write(0x00);
+
+  // Initiate I2C read communication starting from there
+  i2c_rep_start((i2cClockRealtime << 1) | I2C_READ);
+
+  // Read all time and date registers
+  uint8_t const second  = i2c_read(false);
+  uint8_t const minute  = i2c_read(false);
+  uint8_t const hour    = i2c_read(false);
+  uint8_t const weekday = i2c_read(false);
+  uint8_t const day     = i2c_read(false);
+  uint8_t const month   = i2c_read(false);
+  uint8_t const year    = i2c_read(true);
+
+  // Stop I2C read communication
+  i2c_stop();
+
+  // Input voltage (use battery)
+  pinMode(pinClockRealtimeVCC, INPUT);
+
+  datetime.Second = (second >> 4) * 10 + (second & 0x0F);
+  datetime.Minute = (minute >> 4) * 10 + (minute & 0x0F);
+  datetime.Hour   = (hour   >> 4) * 10 + (hour   & 0x0F);
+  datetime.Wday   = weekday;
+  datetime.Day    = (day    >> 4) * 10 + (day    & 0x0F);
+  datetime.Month  = (month  >> 4) * 10 + (month  & 0x0F);
+  datetime.Year   = (year   >> 4) * 10 + (year   & 0x0F) + (2000 - 1970);
+}
+
+
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Time
 //
 
 void printTime()
@@ -360,6 +486,12 @@ void printTime()
   TimeElements datetime;
   breakTime(now(), datetime);
 
+  printTime(datetime);
+}
+
+
+void printTime(TimeElements const & datetime)
+{
   Serial.print(datetime.Year + 1970);
 
   Serial.print('-');
@@ -394,17 +526,93 @@ void printTime()
 }
 
 
+int32_t updateTime(TimeElements const & datetime)
+{
+  time_t const nowBefore = now();
+
+  setTime(
+    datetime.Hour,
+    datetime.Minute,
+    datetime.Second,
+    datetime.Day,
+    datetime.Month,
+    datetime.Year + (1970 - 2000)
+  );
+
+  return static_cast<int32_t>(now() - nowBefore);
+}
+
+
+bool readTime(TimeElements& datetime)
+{
+  uint8_t digit10 = 0;
+
+  for (uint8_t field = 0; field < (2+2+2 + 2+2); ) {
+    int const input = Serial.read();
+
+    // Abort on any non-digit input
+    if (input < '0' || input > '9')
+      return false;
+
+    uint8_t const digit = (input - '0');
+    
+    switch (field++) {
+      case 0:  // 10-digit of year
+      case 2:  // 10-digit of month
+      case 4:  // 10-digit of day
+      case 6:  // 10-digit of hour
+      case 8:  // 10-digit of minute
+        digit10 = digit * 10;
+        break;
+
+      case 1:  // 1-digit of year
+        datetime.Year = digit10 + digit + (2000 - 1970);
+        break;
+
+      case 3:  // 1-digit of month
+        datetime.Month = digit10 + digit;
+        if (datetime.Month < 1 || datetime.Month > 12)
+          return false;
+        break;
+
+      case 5:  // 1-digit of day
+        datetime.Day = digit10 + digit;
+        if (datetime.Day < 1 || datetime.Day > 31)
+          return false;
+        break;
+
+      case 7:  // 1-digit of hour
+        datetime.Hour = digit10 + digit;
+        if (datetime.Hour > 23)
+          return false;
+        break;
+
+      case 9:  // 1-digit of minute
+        datetime.Minute = digit10 + digit;
+        if (datetime.Minute > 59)
+          return false;
+        break;
+    }
+  }
+
+  // Second is not part of accepted input
+  datetime.Second = 0;
+
+  return true;
+}
+
+
 ///////////////////////////////////////////////////////////////////////////////
 //
 //  Timers
 //
 
-Timer timerReceiverOn     (Timer::ONCE   | Timer::STOPPED,         3UL * 1000UL);
-Timer timerReceiverAdjust (Timer::ONCE   | Timer::STOPPED,        30UL * 1000UL);
-Timer timerReceiverReset  (Timer::REPEAT | Timer::STARTED, 60UL * 60UL * 1000UL);
+Timer timerClockReceiverOn     (Timer::ONCE   | Timer::STOPPED,         3UL * 1000UL);
+Timer timerClockReceiverAdjust (Timer::ONCE   | Timer::STOPPED,        30UL * 1000UL);
+Timer timerClockReceiverReset  (Timer::REPEAT | Timer::STARTED, 60UL * 60UL * 1000UL);
 
-Timer timerDisplay (Timer::REPEAT | Timer::STARTED | Timer::IMMEDIATE,   10UL);
-Timer timerStatus  (Timer::REPEAT | Timer::STOPPED | Timer::DELAYED,   1000UL);
+Timer timerDisplay (Timer::REPEAT | Timer::STOPPED | Timer::IMMEDIATE,   10UL);
+Timer timerUpdate  (Timer::REPEAT | Timer::STOPPED | Timer::DELAYED,   1000UL);
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -420,21 +628,38 @@ void setup()
   Serial.println();
   Serial.println(F("Send 'D' to toggle display updates."));
   Serial.println(F("Send 'R' to reset DCF77 receiver."));
+  Serial.println(F("Send 'S' followed by 'yyMMddHHmm' timestamp to set date and time."));
   Serial.println();
 
   setupDisplay();
 
-  pinMode(pinReceiverData, INPUT);
-  pinMode(pinReceiverOff,  OUTPUT);
+  pinMode(pinClockReceiverData, INPUT);
+  pinMode(pinClockReceiverOff,  OUTPUT);
 
   Serial.println(F("DCF77 receiver initially switched off."));
-  digitalWrite(pinReceiverOff, HIGH);
-  timerReceiverOn.start();
+  digitalWrite(pinClockReceiverOff, HIGH);
+  timerClockReceiverOn.start();
 
-  setupReceiver();
+  setupClockReceiver();
 
-  if (Serial)
-    timerStatus.start();
+  setupClockRealtime();
+
+  if (connectedClockRealtime) {
+    Serial.println(F("DS3231 real-time clock communication established, setting on-board time."));
+
+    TimeElements datetime;
+    readClockRealtime(datetime);
+
+    updateTime(datetime);
+  }
+
+  for (uint32_t timeIntroStart = millis(); millis() - timeIntroStart < 5000UL; ) {
+    updateDisplayIntro();
+    updateLeds();
+  }
+
+  timerDisplay.start();
+  timerUpdate .start();
 }
 
 
@@ -455,14 +680,11 @@ void loop()
   uint32_t const timeStart = micros();
 
 
-  if (timerReceiverOn.due()) {
+  if (timerClockReceiverOn.due()) {
     working = true;
 
     Serial.println(F("DCF77 receiver switched on. (Send 'R' to reset.)"));
-    digitalWrite(pinReceiverOff, LOW);
-
-    if (stateReceiver == DCF77_STATE_IGNORED)
-      stateReceiver = DCF77_STATE_PENDING;
+    digitalWrite(pinClockReceiverOff, LOW);
   }
 
 
@@ -476,112 +698,163 @@ void loop()
     Serial.println();
 
     if (timestamp.status == DCF77Timestamp::VALID) {
-      if (stateReceiver == DCF77_STATE_IGNORED) {
-        Serial.println(F("DCF77 time adjustment ignored per user request."));
-      }
-      else {
-        Serial.println(F("DCF77 time adjustment scheduled in 30 seconds."));
-        timerReceiverAdjust.start();
-        timerReceiverReset .start();
-      }
+      Serial.println(F("DCF77 time adjustment scheduled in 30 seconds."));
+      timerClockReceiverAdjust.start();
+      timerClockReceiverReset .start();
     }
   }
 
 
-  if (timerReceiverAdjust.due()) {
-    if (stateReceiver == DCF77_STATE_IGNORED) {
-      Serial.println(F("DCF77 time adjustment cancelled: Ignored per user request."));
-    }
-    else if (timestamp.status != DCF77Timestamp::VALID) {
+  if (timerClockReceiverAdjust.due()) {
+    working = true;
+
+    if (timestamp.status != DCF77Timestamp::VALID) {
       Serial.println(F("DCF77 time adjustment cancelled: Received timestamp is not valid anymore."));
     }
     else {
-      Serial.println(F("DCF77 time adjustment applied."));
+      TimeElements datetime;
 
-      setTime(
-        timestamp.time.hour,
-        timestamp.time.minute,
-        30,
-        timestamp.date.day,
-        timestamp.date.month,
-        timestamp.date.year + 2000
-      );
+      datetime.Hour   = timestamp.time.hour;
+      datetime.Minute = timestamp.time.minute;
+      datetime.Second = 30;
+      datetime.Day    = timestamp.date.day;
+      datetime.Month  = timestamp.date.month;
+      datetime.Year   = timestamp.date.year + (2000 - 1970);
 
-      stateReceiver = DCF77_STATE_RECEIVED;
+      int32_t const deltaSeconds = updateTime(datetime);
+
+      if (connectedClockRealtime)
+        writeClockRealtime(datetime);
+
+      if (deltaSeconds == 0) {
+        Serial.println(F("DCF77 time adjustment applied (no delta against on-board time)."));
+      }
+      else {
+        Serial.print(F("DCF77 time adjustment applied ("));
+        printTime(datetime);
+        Serial.print(F(", delta: "));
+        Serial.print(deltaSeconds);
+        Serial.println(F(" seconds against on-board time)."));
+      }
     }
   }
 
   
-  if (timerReceiverReset.due()) {
+  if (timerClockReceiverReset.due()) {
+    working = true;
+
     Serial.println(F("DCF77 receiver switched off for automatic periodic reset."));
-    digitalWrite(pinReceiverOff, HIGH);
-    timerReceiverOn.start();
+    digitalWrite(pinClockReceiverOff, HIGH);
+    timerClockReceiverOn.start();
+  }
+
+
+  if (timerUpdate.due()) {
+    working = true;
+
+    if (connectedClockRealtime) {
+      uint8_t const second = now() % 60;
+
+      if (second == 45) {
+        TimeElements datetime;
+        readClockRealtime(datetime);
+
+        int32_t const deltaSeconds = updateTime(datetime);
+
+        if (deltaSeconds != 0) {
+          Serial.print(F("On-board time adjusted against DS3231 real-time clock ("));
+          printTime(datetime);
+          Serial.print(F(", delta: "));
+          Serial.print(deltaSeconds);
+          Serial.println(F(" seconds)."));
+        }
+      }
+    }
+
+    if (Serial) {
+      printTime();
+      Serial.print(F(", "));
+      
+      printSamples();
+      Serial.print(F(", "));
+
+      uint8_t const activity = (100 * durationWorking / (durationWorking + durationIdle));
+
+      Serial.print(F("FPS: "));
+      Serial.print(nFrames);
+      Serial.print(F(", CPU: "));
+      Serial.print(activity);
+      Serial.println(F("%"));
+
+      nFrames = 0;
+
+      durationWorking = 0;
+      durationIdle    = 0;
+    }
   }
 
 
   if (timerDisplay.due()) {
     working = true;
 
-    updateDisplay();
-    FastLED.show();
+    updateDisplayTime();
+    updateLeds();
 
     nFrames += 1;
   }
 
 
-  if (timerStatus.due()) {
+  if (Serial.available()) {
     working = true;
 
-    printTime();
-    Serial.print(F(", "));
-    
-    printSamples();
-    Serial.print(F(", "));
+    int const input = Serial.read();
 
-    uint8_t const activity = (100 * durationWorking / (durationWorking + durationIdle));
+    switch (input) {
+      case 'd':
+      case 'D':
+        if (timerDisplay.active()) {
+          timerDisplay.stop();
+          Serial.println(F("Display updates switched off. (Send 'D' to toggle.)"));
+        }
+        else {
+          timerDisplay.start();
+          Serial.println(F("Display updates switched on. (Send 'D' to toggle.)"));
+        }
+        break;
+        
+      case 'r':
+      case 'R':
+        Serial.println(F("DCF77 receiver switched off for reset per user request."));
+        digitalWrite(pinClockReceiverOff, HIGH);
+        timerClockReceiverOn   .start();
+        timerClockReceiverReset.start();
+        break;
 
-    Serial.print(F("FPS: "));
-    Serial.print(nFrames);
-    Serial.print(F(", CPU: "));
-    Serial.print(activity);
-    Serial.println(F("%"));
+      case 's':
+      case 'S':
+        TimeElements datetime;
 
-    nFrames = 0;
+        if (readTime(datetime)) {
+          int32_t const deltaSeconds = updateTime(datetime);
 
-    durationWorking = 0;
-    durationIdle    = 0;
+          if (connectedClockRealtime)
+            writeClockRealtime(datetime);
 
-    if (Serial.available()) {
-      uint8_t const input = Serial.read();
-
-      switch (input) {
-        case 'd':
-        case 'D':
-          if (timerDisplay.active()) {
-            timerDisplay.stop();
-            Serial.println(F("Display updates switched off. (Send 'D' to toggle.)"));
+          if (deltaSeconds == 0) {
+            Serial.println(F("On-board time and RS3231 real-time clock adjusted per user request (no delta against on-board time)."));
           }
           else {
-            timerDisplay.start();
-            Serial.println(F("Display updates switched on. (Send 'D' to toggle.)"));
+            Serial.print(F("On-board time and RS3231 real-time clock adjusted per user request ("));
+            printTime(datetime);
+            Serial.print(F(", delta: "));
+            Serial.print(deltaSeconds);
+            Serial.println(F(" seconds against on-board time)."));
           }
-          break;
-          
-        case 'r':
-        case 'R':
-          Serial.println(F("DCF77 receiver switched off for reset per user request."));
-          digitalWrite(pinReceiverOff, HIGH);
-          timerReceiverOn   .start();
-          timerReceiverReset.start();
-          break;
-
-        case 't':
-        case 'T':
-          // Test countdown to Happy Birthday Vivi
-          setTime(23, 59, 45, 11, 12, 2015);
-          stateReceiver = DCF77_STATE_IGNORED;
-          break;
-      }
+        }
+        else {
+          Serial.println(F("On-board time and RS3231 real-time clock not adjusted: Invalid timestamp input (expected 'yyMMddHHmm')."));
+        }
+        break;
     }
   }
 
