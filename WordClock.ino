@@ -560,6 +560,9 @@ bool readTime(TimeElements& datetime)
   uint8_t digit10 = 0;
 
   for (uint8_t field = 0; field < (2+2+2 + 2+2); ) {
+    // Wait until input is available
+    while (Serial.available() == 0) {}
+
     int const input = Serial.read();
 
     // Abort on any non-digit input
