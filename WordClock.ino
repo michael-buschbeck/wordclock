@@ -369,6 +369,8 @@ void updateLeds()
 //  DS3231 Real-Time Clock
 //
 
+constexpr bool useClockRealtimeBatteryWhileIdle = false;
+
 bool connectedClockRealtime = false;
 
 
@@ -392,8 +394,10 @@ void setupClockRealtime()
     connectedClockRealtime = true;
   }
 
-  // Input voltage (use battery)
-  pinMode(pinClockRealtimeVCC, INPUT);
+  if (useClockRealtimeBatteryWhileIdle) {
+    // Input voltage (use battery)
+    pinMode(pinClockRealtimeVCC, INPUT);
+  }
 }
 
 
@@ -407,12 +411,14 @@ void writeClockRealtime(TimeElements const & datetime)
   uint8_t const month   = datetime.Month;
   uint8_t const year    = datetime.Year + (1970 - 2000);
 
-  // Input voltage (use VCC during I2C communication)
-  pinMode(pinClockRealtimeVCC, OUTPUT);
-  digitalWrite(pinClockRealtimeVCC, HIGH);
+  if (useClockRealtimeBatteryWhileIdle) {
+    // Input voltage (use VCC during I2C communication)
+    pinMode(pinClockRealtimeVCC, OUTPUT);
+    digitalWrite(pinClockRealtimeVCC, HIGH);
 
-  // Wait until VCC has been established
-  delayMicroseconds(10);
+    // Wait until VCC has been established
+    delayMicroseconds(10);
+  }
 
   // Initiate I2C write communication and write register address
   i2c_start((i2cClockRealtime << 1) | I2C_WRITE);
@@ -430,19 +436,23 @@ void writeClockRealtime(TimeElements const & datetime)
   // Stop I2C write communication
   i2c_stop();
 
-  // Input voltage (use battery)
-  pinMode(pinClockRealtimeVCC, INPUT);
+  if (useClockRealtimeBatteryWhileIdle) {
+    // Input voltage (use battery)
+    pinMode(pinClockRealtimeVCC, INPUT);
+  }
 }
 
 
 void readClockRealtime(TimeElements& datetime)
 {
-  // Input voltage (use VCC during I2C communication)
-  pinMode(pinClockRealtimeVCC, OUTPUT);
-  digitalWrite(pinClockRealtimeVCC, HIGH);
+  if (useClockRealtimeBatteryWhileIdle) {
+    // Input voltage (use VCC during I2C communication)
+    pinMode(pinClockRealtimeVCC, OUTPUT);
+    digitalWrite(pinClockRealtimeVCC, HIGH);
 
-  // Wait until VCC has been established
-  delayMicroseconds(10);
+    // Wait until VCC has been established
+    delayMicroseconds(10);
+  }
 
   // Initiate I2C write communication and write register address
   i2c_start((i2cClockRealtime << 1) | I2C_WRITE);
@@ -463,8 +473,10 @@ void readClockRealtime(TimeElements& datetime)
   // Stop I2C read communication
   i2c_stop();
 
-  // Input voltage (use battery)
-  pinMode(pinClockRealtimeVCC, INPUT);
+  if (useClockRealtimeBatteryWhileIdle) {
+    // Input voltage (use battery)
+    pinMode(pinClockRealtimeVCC, INPUT);
+  }
 
   datetime.Second = (second >> 4) * 10 + (second & 0x0F);
   datetime.Minute = (minute >> 4) * 10 + (minute & 0x0F);
